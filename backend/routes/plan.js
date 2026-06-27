@@ -1,6 +1,7 @@
 import express from "express";
 import { generateStudyPlan } from "../ai/gemini.js";
 import auth from "../middlewares/auth.js";
+import StudyPlan from "../models/StudyPlan.js";
 
 const router = express.Router();
 
@@ -104,22 +105,41 @@ Return STRICT JSON only:
   "motivation": "Slogan"
 }`;
 
-    let aiResponse = await generateStudyPlan(prompt);
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("TIMEOUT_ERROR")), 30000);
+    });
+
+    let aiResponse;
+    try {
+      aiResponse = await Promise.race([generateStudyPlan(prompt), timeoutPromise]);
+    } catch (err) {
+      if (err.message === "TIMEOUT_ERROR") {
+        return res.status(504).json({
+          success: false,
+          error: "Request timed out while generating study plan.",
+        });
+      }
+      return res.status(503).json({
+        success: false,
+        error: "AI service is temporarily busy. Please try again in a few minutes.",
+      });
+    }
+
     const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return res.status(500).json({ success: false, error: "AI failed to generate a valid plan" });
+      return res.status(500).json({ success: false, error: "AI service is temporarily busy. Please try again in a few minutes." });
     }
 
     let aiPlan;
     try {
       aiPlan = JSON.parse(jsonMatch[0]);
     } catch (err) {
-      return res.status(500).json({ success: false, error: "AI returned invalid JSON" });
+      return res.status(500).json({ success: false, error: "AI service is temporarily busy. Please try again in a few minutes." });
     }
 
-    /* ---------------- FINAL RESPONSE ---------------- */
-    res.json({
-      success: true,
+    /* ---------------- SAVE TO MONGODB ---------------- */
+    const planTitle = req.body.title || `${filteredSubjects.slice(0, 3).join(", ")} Study Plan`;
+    const savedData = {
       daysLeft,
       dailyTime: formatMinutes(DAILY_MINUTES),
       perDayHours: Object.fromEntries(
@@ -127,6 +147,25 @@ Return STRICT JSON only:
       ),
       schedule,
       aiPlan,
+    };
+
+    const newPlan = new StudyPlan({
+      userId: req.user.id,
+      title: planTitle,
+      subjects: filteredSubjects,
+      weakSubjects: weakSubjects,
+      examDate: exam,
+      dailyHours: Number(dailyHours),
+      generatedPlan: savedData,
+    });
+
+    await newPlan.save();
+
+    /* ---------------- FINAL RESPONSE ---------------- */
+    res.json({
+      success: true,
+      planId: newPlan._id,
+      ...savedData,
     });
   } catch (err) {
     next(err);

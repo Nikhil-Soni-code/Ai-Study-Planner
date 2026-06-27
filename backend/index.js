@@ -7,14 +7,40 @@ import mongoose from "mongoose";
 
 import authRoutes from "./routes/auth.js";
 import planRoutes from "./routes/plan.js";
+import plansRoutes from "./routes/plans.js";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+// 📝 Request-Response Logger Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+
+  const sanitizeBody = (body) => {
+    if (!body || typeof body !== "object") return body;
+    const sanitized = { ...body };
+    if (sanitized.password) sanitized.password = "[REDACTED]";
+    return sanitized;
+  };
+
+  console.log(`[REQUEST] 📥 ${req.method} ${req.originalUrl} | Payload:`, sanitizeBody(req.body));
+  console.log(`[AUTH] JWT Header Presence: ${req.header("Authorization") ? "Yes" : "No"}`);
+
+  const originalJson = res.json;
+  res.json = function (data) {
+    const duration = Date.now() - start;
+    console.log(`[RESPONSE] 📤 ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms | Payload:`, data);
+    return originalJson.call(this, data);
+  };
+
+  next();
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/plan", planRoutes);
+app.use("/api/plans", plansRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -35,6 +61,12 @@ app.use((err, req, res, next) => {
     message = Object.values(err.errors).map(val => val.message).join(", ");
   }
 
+  // Mongoose invalid ID cast error (e.g. invalid ObjectId)
+  if (err.name === "CastError") {
+    statusCode = 400;
+    message = `Invalid format for field ${err.path}`;
+  }
+
   res.status(statusCode).json({
     success: false,
     error: message,
@@ -43,7 +75,9 @@ app.use((err, req, res, next) => {
 });
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+  })
   .then(() => console.log("✅ MongoDB Connected"))
   .catch(err => console.error("❌ Mongo Error:", err));
 

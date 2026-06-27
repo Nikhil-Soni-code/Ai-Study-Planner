@@ -9,6 +9,9 @@ const auth = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (!decoded || !decoded.id) {
+      return res.status(401).json({ error: "Invalid token payload. Authorization failed." });
+    }
     req.user = decoded;
     next();
   } catch (err) {
