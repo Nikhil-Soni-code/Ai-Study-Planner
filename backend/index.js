@@ -11,57 +11,122 @@ import plansRoutes from "./routes/plans.js";
 
 const app = express();
 
-app.use(cors());
+/* ===========================
+   CORS Configuration
+=========================== */
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      process.env.FRONTEND_URL,
+    ].filter(Boolean),
+    credentials: true,
+  })
+);
+
+/* ===========================
+   Middleware
+=========================== */
 app.use(express.json());
 
-// 📝 Request-Response Logger Middleware
+/* ===========================
+   Health Check Route
+=========================== */
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "AI Study Planner API Running 🚀",
+    environment: process.env.NODE_ENV || "development",
+  });
+});
+
+/* ===========================
+   Request / Response Logger
+=========================== */
 app.use((req, res, next) => {
   const start = Date.now();
 
   const sanitizeBody = (body) => {
     if (!body || typeof body !== "object") return body;
+
     const sanitized = { ...body };
-    if (sanitized.password) sanitized.password = "[REDACTED]";
+
+    if (sanitized.password) {
+      sanitized.password = "[REDACTED]";
+    }
+
     return sanitized;
   };
 
-  console.log(`[REQUEST] 📥 ${req.method} ${req.originalUrl} | Payload:`, sanitizeBody(req.body));
-  console.log(`[AUTH] JWT Header Presence: ${req.header("Authorization") ? "Yes" : "No"}`);
+  console.log(
+    `[REQUEST] 📥 ${req.method} ${req.originalUrl} | Payload:`,
+    sanitizeBody(req.body)
+  );
+
+  console.log(
+    `[AUTH] JWT Header Presence: ${
+      req.header("Authorization") ? "Yes" : "No"
+    }`
+  );
 
   const originalJson = res.json;
+
   res.json = function (data) {
     const duration = Date.now() - start;
-    console.log(`[RESPONSE] 📤 ${req.method} ${req.originalUrl} | Status: ${res.statusCode} | Duration: ${duration}ms | Payload:`, data);
+
+    console.log(
+      `[RESPONSE] 📤 ${req.method} ${req.originalUrl} | Status: ${
+        res.statusCode
+      } | Duration: ${duration}ms`
+    );
+
     return originalJson.call(this, data);
   };
 
   next();
 });
 
+/* ===========================
+   API Routes
+=========================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/plan", planRoutes);
 app.use("/api/plans", plansRoutes);
 
-// Global Error Handler
+/* ===========================
+   404 Handler
+=========================== */
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Route not found",
+  });
+});
+
+/* ===========================
+   Global Error Handler
+=========================== */
 app.use((err, req, res, next) => {
-  console.error("❌ Error:", err.stack);
+  console.error("❌ Error:", err);
 
   let statusCode = err.status || 500;
   let message = err.message || "Internal Server Error";
 
-  // Mongoose duplicate key error
+  // Duplicate key
   if (err.code === 11000) {
     statusCode = 400;
     message = "Duplicate field value entered";
   }
 
-  // Mongoose validation error
+  // Validation errors
   if (err.name === "ValidationError") {
     statusCode = 400;
-    message = Object.values(err.errors).map(val => val.message).join(", ");
+    message = Object.values(err.errors)
+      .map((val) => val.message)
+      .join(", ");
   }
 
-  // Mongoose invalid ID cast error (e.g. invalid ObjectId)
+  // Invalid ObjectId
   if (err.name === "CastError") {
     statusCode = 400;
     message = `Invalid format for field ${err.path}`;
@@ -70,18 +135,32 @@ app.use((err, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     error: message,
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined
+    ...(process.env.NODE_ENV === "development" && {
+      stack: err.stack,
+    }),
   });
 });
 
-mongoose
-  .connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 5000,
-  })
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch(err => console.error("❌ Mongo Error:", err));
+/* ===========================
+   MongoDB Connection
+=========================== */
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+    console.log("✅ MongoDB Connected");
+
+    const PORT = process.env.PORT || 5000;
+
+    app.listen(PORT, () => {
+      console.log(`✅ Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("❌ Mongo Error:", err.message);
+    process.exit(1);
+  }
+};
+
+connectDB();
