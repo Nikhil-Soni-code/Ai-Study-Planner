@@ -269,7 +269,7 @@ Database hosted on **MongoDB Atlas**
 
 GitHub: https://github.com/Nikhil-Soni-code
 
-LinkedIn: *(Add your LinkedIn profile here)*
+LinkedIn: (https://www.linkedin.com/in/nikhil--soni/)
 
 ---
 
